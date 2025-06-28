@@ -13,16 +13,16 @@
 struct NeuralNetwork
 {
    // LSTM-style architecture for time series
-   double inputWeights[][]; 
-   double hiddenWeights[][][];  // Multiple hidden layers
-   double outputWeights[][];
-   double forgetGate[][];       // LSTM forget gate
-   double inputGate[][];        // LSTM input gate
-   double outputGate[][];       // LSTM output gate
-   double cellState[][];        // LSTM cell state
+   double inputWeights[];       // Flattened 2D array (input x hidden[0])
+   double hiddenWeights[];      // Flattened 3D array (layers x neurons x neurons)
+   double outputWeights[];      // Flattened 2D array
+   double forgetGate[];         // Flattened 2D array
+   double inputGate[];          // Flattened 2D array
+   double outputGate[];         // Flattened 2D array
+   double cellState[];          // Flattened 2D array
    
    // Attention mechanism
-   double attentionWeights[][];
+   double attentionWeights[];   // Flattened 2D array
    double contextVector[];
    
    // Adaptive learning
@@ -34,6 +34,11 @@ struct NeuralNetwork
    double trainingError;
    double validationError;
    int epochsTrained;
+   
+   // Dimensions for reconstruction
+   int inputSize;
+   int hiddenSizes[];
+   int outputSize;
 };
 
 //--- Hidden Liquidity Detection
@@ -106,7 +111,7 @@ struct MarketMakerInventory
 struct AdaptiveStopLoss
 {
    // Q-learning parameters
-   double qTable[][];          // State-action values
+   double qTable[];            // Flattened 2D array (states x actions)
    double rewardHistory[];     // Historical rewards
    double epsilon;             // Exploration rate
    double gamma;               // Discount factor
@@ -126,14 +131,18 @@ struct AdaptiveStopLoss
    double averageReward;       // Average reward per trade
    double stopEfficiency;      // How often stops save money
    double falseStopRate;       // Rate of premature stops
+   
+   // Dimensions
+   int numStates;
+   int numActions;
 };
 
 //--- Cross-Asset Contagion
 struct CrossAssetContagion
 {
    // Correlation dynamics
-   double correlationMatrix[][];     // Dynamic correlations
-   double tailDependence[][];       // Extreme event correlations
+   double correlationMatrix[];      // Flattened 2D array (numAssets x numAssets)
+   double tailDependence[];         // Flattened 2D array
    double correlationBreaks[];      // Correlation regime changes
    
    // Contagion metrics
@@ -150,6 +159,9 @@ struct CrossAssetContagion
    double centralityScore[];        // Network centrality
    double clusterRisk[];           // Risk clustering
    double transmissionSpeed;        // Contagion speed
+   
+   // Dimensions
+   int numAssets;
 };
 
 //--- High-Frequency Microstructure
@@ -207,45 +219,56 @@ void InitializeNeuralNetwork(NeuralNetwork &nn, int inputSize, int hiddenSizes[]
 {
    int numHidden = ArraySize(hiddenSizes);
    
-   // Initialize input layer
-   ArrayResize(nn.inputWeights, inputSize);
+   // Store dimensions
+   nn.inputSize = inputSize;
+   nn.outputSize = outputSize;
+   ArrayResize(nn.hiddenSizes, numHidden);
+   ArrayCopy(nn.hiddenSizes, hiddenSizes);
+   
+   // Initialize input weights (inputSize x hiddenSizes[0])
+   ArrayResize(nn.inputWeights, inputSize * hiddenSizes[0]);
    for(int i = 0; i < inputSize; i++)
    {
-      ArrayResize(nn.inputWeights[i], hiddenSizes[0]);
       for(int j = 0; j < hiddenSizes[0]; j++)
-         nn.inputWeights[i][j] = (MathRand() / 32767.0 - 0.5) * MathSqrt(2.0 / inputSize);
-   }
-   
-   // Initialize hidden layers
-   ArrayResize(nn.hiddenWeights, numHidden - 1);
-   for(int layer = 0; layer < numHidden - 1; layer++)
-   {
-      ArrayResize(nn.hiddenWeights[layer], hiddenSizes[layer]);
-      for(int i = 0; i < hiddenSizes[layer]; i++)
       {
-         ArrayResize(nn.hiddenWeights[layer][i], hiddenSizes[layer + 1]);
-         for(int j = 0; j < hiddenSizes[layer + 1]; j++)
-            nn.hiddenWeights[layer][i][j] = (MathRand() / 32767.0 - 0.5) * MathSqrt(2.0 / hiddenSizes[layer]);
+         int idx = i * hiddenSizes[0] + j;
+         nn.inputWeights[idx] = (MathRand() / 32767.0 - 0.5) * MathSqrt(2.0 / inputSize);
       }
    }
    
-   // Initialize LSTM gates
-   ArrayResize(nn.forgetGate, hiddenSizes[0]);
-   ArrayResize(nn.inputGate, hiddenSizes[0]);
-   ArrayResize(nn.outputGate, hiddenSizes[0]);
-   ArrayResize(nn.cellState, hiddenSizes[0]);
+   // Calculate total size for hidden weights
+   int hiddenWeightsSize = 0;
+   for(int layer = 0; layer < numHidden - 1; layer++)
+      hiddenWeightsSize += hiddenSizes[layer] * hiddenSizes[layer + 1];
    
-   for(int i = 0; i < hiddenSizes[0]; i++)
+   // Initialize hidden weights
+   ArrayResize(nn.hiddenWeights, hiddenWeightsSize);
+   int offset = 0;
+   for(int layer = 0; layer < numHidden - 1; layer++)
    {
-      ArrayResize(nn.forgetGate[i], hiddenSizes[0]);
-      ArrayResize(nn.inputGate[i], hiddenSizes[0]);
-      ArrayResize(nn.outputGate[i], hiddenSizes[0]);
-      ArrayResize(nn.cellState[i], hiddenSizes[0]);
+      for(int i = 0; i < hiddenSizes[layer]; i++)
+      {
+         for(int j = 0; j < hiddenSizes[layer + 1]; j++)
+         {
+            nn.hiddenWeights[offset++] = (MathRand() / 32767.0 - 0.5) * MathSqrt(2.0 / hiddenSizes[layer]);
+         }
+      }
    }
    
+   // Initialize LSTM gates (all are hiddenSizes[0] x hiddenSizes[0])
+   int gateSize = hiddenSizes[0] * hiddenSizes[0];
+   ArrayResize(nn.forgetGate, gateSize);
+   ArrayResize(nn.inputGate, gateSize);
+   ArrayResize(nn.outputGate, gateSize);
+   ArrayResize(nn.cellState, gateSize);
+   
    // Initialize attention mechanism
-   ArrayResize(nn.attentionWeights, hiddenSizes[numHidden - 1]);
-   ArrayResize(nn.contextVector, hiddenSizes[numHidden - 1]);
+   int lastHiddenSize = hiddenSizes[numHidden - 1];
+   ArrayResize(nn.attentionWeights, lastHiddenSize * lastHiddenSize);
+   ArrayResize(nn.contextVector, lastHiddenSize);
+   
+   // Initialize output weights
+   ArrayResize(nn.outputWeights, lastHiddenSize * outputSize);
    
    nn.learningRate = 0.001;
    nn.momentum = 0.9;
@@ -257,8 +280,8 @@ void InitializeNeuralNetwork(NeuralNetwork &nn, int inputSize, int hiddenSizes[]
 //+------------------------------------------------------------------+
 void LSTMForward(NeuralNetwork &nn, double inputs[], double &outputs[])
 {
-   int inputSize = ArraySize(inputs);
-   int hiddenSize = ArraySize(nn.forgetGate);
+   int inputSize = nn.inputSize;
+   int hiddenSize = nn.hiddenSizes[0];  // First hidden layer size
    
    // Temporary arrays
    double hidden[];
@@ -269,41 +292,49 @@ void LSTMForward(NeuralNetwork &nn, double inputs[], double &outputs[])
    {
       hidden[i] = 0;
       for(int j = 0; j < inputSize; j++)
-         hidden[i] += inputs[j] * nn.inputWeights[j][i];
+      {
+         int idx = j * hiddenSize + i;
+         hidden[i] += inputs[j] * nn.inputWeights[idx];
+      }
    }
    
    // LSTM cell computation
    for(int i = 0; i < hiddenSize; i++)
    {
+      // Access gate values from flattened arrays
+      int diag_idx = i * hiddenSize + i;  // Diagonal element
+      
       // Forget gate
-      double forget = Sigmoid(hidden[i] + nn.forgetGate[i][i]);
+      double forget = Sigmoid(hidden[i] + nn.forgetGate[diag_idx]);
       
       // Input gate
-      double input = Sigmoid(hidden[i] + nn.inputGate[i][i]);
+      double input = Sigmoid(hidden[i] + nn.inputGate[diag_idx]);
       
       // Candidate values
       double candidate = MathTanh(hidden[i]);
       
       // Update cell state
-      nn.cellState[i][i] = forget * nn.cellState[i][i] + input * candidate;
+      nn.cellState[diag_idx] = forget * nn.cellState[diag_idx] + input * candidate;
       
       // Output gate
-      double output = Sigmoid(hidden[i] + nn.outputGate[i][i]);
+      double output = Sigmoid(hidden[i] + nn.outputGate[diag_idx]);
       
       // Hidden state
-      hidden[i] = output * MathTanh(nn.cellState[i][i]);
+      hidden[i] = output * MathTanh(nn.cellState[diag_idx]);
    }
    
    // Apply attention mechanism
    ApplyAttention(nn, hidden);
    
    // Output layer (simplified)
-   ArrayResize(outputs, 1);
-   outputs[0] = 0;
-   for(int i = 0; i < hiddenSize; i++)
-      outputs[0] += hidden[i] * nn.contextVector[i];
-   
-   outputs[0] = Sigmoid(outputs[0]);
+   ArrayResize(outputs, nn.outputSize);
+   for(int i = 0; i < nn.outputSize; i++)
+   {
+      outputs[i] = 0;
+      for(int j = 0; j < hiddenSize; j++)
+         outputs[i] += hidden[j] * nn.contextVector[j];
+      outputs[i] = Sigmoid(outputs[i]);
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -329,7 +360,10 @@ void ApplyAttention(NeuralNetwork &nn, double &hidden[])
    {
       scores[i] = 0;
       for(int j = 0; j < size; j++)
-         scores[i] += hidden[j] * nn.attentionWeights[j][i];
+      {
+         int idx = j * size + i;  // Access flattened 2D array
+         scores[i] += hidden[j] * nn.attentionWeights[idx];
+      }
       
       scores[i] = MathExp(scores[i]);
       sumExp += scores[i];
@@ -911,13 +945,14 @@ void InitializeAdaptiveStopLoss(AdaptiveStopLoss &asl)
    int numStates = 10;   // Discretized states
    int numActions = 5;   // Different stop distances
    
-   ArrayResize(asl.qTable, numStates);
-   for(int i = 0; i < numStates; i++)
-   {
-      ArrayResize(asl.qTable[i], numActions);
-      for(int j = 0; j < numActions; j++)
-         asl.qTable[i][j] = 0;  // Initialize to 0
-   }
+   // Store dimensions
+   asl.numStates = numStates;
+   asl.numActions = numActions;
+   
+   // Initialize flattened Q-table (numStates x numActions)
+   ArrayResize(asl.qTable, numStates * numActions);
+   for(int i = 0; i < numStates * numActions; i++)
+      asl.qTable[i] = 0;  // Initialize to 0
    
    // Initialize stop distances (in ATR multiples)
    ArrayResize(asl.stopDistance, numActions);
@@ -991,19 +1026,20 @@ int ChooseStopAction(int state, AdaptiveStopLoss &asl)
    if(MathRand() / 32767.0 < asl.epsilon)
    {
       // Explore: random action
-      return MathRand() % ArraySize(asl.stopDistance);
+      return MathRand() % asl.numActions;
    }
    else
    {
       // Exploit: best known action
       int bestAction = 0;
-      double bestValue = asl.qTable[state][0];
+      int stateOffset = state * asl.numActions;
+      double bestValue = asl.qTable[stateOffset + 0];
       
-      for(int i = 1; i < ArraySize(asl.stopDistance); i++)
+      for(int i = 1; i < asl.numActions; i++)
       {
-         if(asl.qTable[state][i] > bestValue)
+         if(asl.qTable[stateOffset + i] > bestValue)
          {
-            bestValue = asl.qTable[state][i];
+            bestValue = asl.qTable[stateOffset + i];
             bestAction = i;
          }
       }
@@ -1019,19 +1055,21 @@ void UpdateQLearning(int state, int action, double reward, int nextState,
                     AdaptiveStopLoss &asl)
 {
    // Q-learning update rule
-   double oldQ = asl.qTable[state][action];
+   int idx = state * asl.numActions + action;
+   double oldQ = asl.qTable[idx];
    
    // Find max Q-value for next state
-   double maxNextQ = asl.qTable[nextState][0];
-   for(int i = 1; i < ArraySize(asl.stopDistance); i++)
+   int nextStateOffset = nextState * asl.numActions;
+   double maxNextQ = asl.qTable[nextStateOffset + 0];
+   for(int i = 1; i < asl.numActions; i++)
    {
-      if(asl.qTable[nextState][i] > maxNextQ)
-         maxNextQ = asl.qTable[nextState][i];
+      if(asl.qTable[nextStateOffset + i] > maxNextQ)
+         maxNextQ = asl.qTable[nextStateOffset + i];
    }
    
    // Update Q-value
    double learningRate = 0.1;
-   asl.qTable[state][action] = oldQ + learningRate * (reward + asl.gamma * maxNextQ - oldQ);
+   asl.qTable[idx] = oldQ + learningRate * (reward + asl.gamma * maxNextQ - oldQ);
    
    // Update metrics
    ArrayResize(asl.rewardHistory, ArraySize(asl.rewardHistory) + 1);
@@ -1100,28 +1138,23 @@ double GetATR(string symbol)
 void AnalyzeCrossAssetContagion(string symbols[], CrossAssetContagion &contagion)
 {
    int numAssets = ArraySize(symbols);
+   contagion.numAssets = numAssets;
    
-   // Initialize correlation matrix
-   ArrayResize(contagion.correlationMatrix, numAssets);
-   ArrayResize(contagion.tailDependence, numAssets);
-   
-   for(int i = 0; i < numAssets; i++)
-   {
-      ArrayResize(contagion.correlationMatrix[i], numAssets);
-      ArrayResize(contagion.tailDependence[i], numAssets);
-   }
+   // Initialize flattened correlation matrix (numAssets x numAssets)
+   ArrayResize(contagion.correlationMatrix, numAssets * numAssets);
+   ArrayResize(contagion.tailDependence, numAssets * numAssets);
    
    // Calculate dynamic correlations
    CalculateDynamicCorrelations(symbols, contagion.correlationMatrix);
    
    // Calculate tail dependence (correlation during extreme moves)
-   CalculateTailDependence(symbols, contagion.tailDependence);
+   CalculateTailDependence(symbols, contagion);
    
    // Detect correlation breaks
    DetectCorrelationBreaks(symbols, contagion);
    
    // Calculate contagion metrics
-   contagion.contagionIndex = CalculateContagionIndex(contagion.correlationMatrix);
+   contagion.contagionIndex = CalculateContagionIndex(contagion.correlationMatrix, numAssets);
    contagion.systemicRisk = CalculateSystemicRisk(contagion);
    
    // Identify leading indicators
@@ -1216,7 +1249,7 @@ double CalculateCorrelation(const double &x[], const double &y[])
 //+------------------------------------------------------------------+
 //| Calculate tail dependence                                        |
 //+------------------------------------------------------------------+
-void CalculateTailDependence(string symbols[], double &tailDep[][])
+void CalculateTailDependence(string symbols[], CrossAssetContagion &contagion)
 {
    int numAssets = ArraySize(symbols);
    
@@ -1225,10 +1258,10 @@ void CalculateTailDependence(string symbols[], double &tailDep[][])
       for(int j = i + 1; j < numAssets; j++)
       {
          double dep = CalculatePairTailDependence(symbols[i], symbols[j]);
-         tailDep[i][j] = dep;
-         tailDep[j][i] = dep;
+         contagion.tailDependence[i * numAssets + j] = dep;
+         contagion.tailDependence[j * numAssets + i] = dep;
       }
-      tailDep[i][i] = 1.0;
+      contagion.tailDependence[i * numAssets + i] = 1.0;
    }
 }
 
@@ -1326,14 +1359,14 @@ double CalculateSystemicRisk(const CrossAssetContagion &contagion)
    // Simplified: use average correlation and tail dependence
    
    double avgTailDep = 0;
-   int n = ArraySize(contagion.tailDependence);
+   int n = contagion.numAssets;
    int count = 0;
    
    for(int i = 0; i < n; i++)
    {
       for(int j = i + 1; j < n; j++)
       {
-         avgTailDep += contagion.tailDependence[i][j];
+         avgTailDep += contagion.tailDependence[i * n + j];
          count++;
       }
    }
@@ -1456,7 +1489,7 @@ double CalculateLaggedCorrelation(const double &x[], const double &y[], int lag)
 //+------------------------------------------------------------------+
 void CalculateNetworkMetrics(CrossAssetContagion &contagion)
 {
-   int n = ArraySize(contagion.correlationMatrix);
+   int n = contagion.numAssets;
    ArrayResize(contagion.centralityScore, n);
    ArrayResize(contagion.clusterRisk, n);
    
@@ -1467,7 +1500,7 @@ void CalculateNetworkMetrics(CrossAssetContagion &contagion)
       for(int j = 0; j < n; j++)
       {
          if(i != j)
-            centrality += MathAbs(contagion.correlationMatrix[i][j]);
+            centrality += MathAbs(contagion.correlationMatrix[i * n + j]);
       }
       contagion.centralityScore[i] = centrality / (n - 1);
    }
@@ -1481,9 +1514,9 @@ void CalculateNetworkMetrics(CrossAssetContagion &contagion)
       
       for(int j = 0; j < n; j++)
       {
-         if(MathAbs(contagion.correlationMatrix[i][j]) > 0.7)
+         if(MathAbs(contagion.correlationMatrix[i * n + j]) > 0.7)
          {
-            clusterCorr += MathAbs(contagion.correlationMatrix[i][j]);
+            clusterCorr += MathAbs(contagion.correlationMatrix[i * n + j]);
             clusterSize++;
          }
       }
