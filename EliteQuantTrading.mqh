@@ -13,8 +13,11 @@
 struct QuantumPortfolio
 {
    // Quantum state representation
-   double amplitudes[][];       // Probability amplitudes
-   double entanglement[][];     // Asset entanglement matrix
+   double amplitudes[];         // Probability amplitudes (flattened 2D: rows * cols)
+   int amplitudes_rows;         // Number of rows in amplitudes matrix
+   int amplitudes_cols;         // Number of columns in amplitudes matrix
+   double entanglement[];       // Asset entanglement matrix (flattened 2D: n * n)
+   int entanglement_size;       // Size of square entanglement matrix
    double coherence;           // Portfolio coherence
    double decoherence;         // Decoherence rate
    
@@ -121,7 +124,9 @@ struct BehavioralSignals
 struct GeneticOptimizer
 {
    // Population
-   double population[][];      // Strategy parameter sets
+   double population[];        // Strategy parameter sets (flattened 2D: popSize * numParams)
+   int population_size;        // Population size
+   int num_params;            // Number of parameters per individual
    double fitness[];           // Fitness scores
    int generation;             // Current generation
    
@@ -193,7 +198,9 @@ struct MLEnsemble
    double modelWeights[];      // Ensemble weights
    
    // Stacking
-   double stackPredictions[][]; // Individual predictions
+   double stackPredictions[];   // Individual predictions (flattened 2D: numModels * numPredictions)
+   int stack_num_models;        // Number of models
+   int stack_num_predictions;   // Number of predictions per model
    double metaPrediction;       // Meta-model prediction
    double confidence;           // Prediction confidence
    
@@ -225,28 +232,28 @@ struct UltraHFTSignals
 //+------------------------------------------------------------------+
 //| Quantum Portfolio Optimization                                   |
 //+------------------------------------------------------------------+
-void OptimizeQuantumPortfolio(string symbols[], double returns[][], 
+void OptimizeQuantumPortfolio(string symbols[], const double &returns[], int returns_rows, int returns_cols,
                               QuantumPortfolio &qp)
 {
    int n = ArraySize(symbols);
    
    // Initialize quantum state
-   ArrayResize(qp.amplitudes, n);
-   ArrayResize(qp.entanglement, n);
+   qp.amplitudes_rows = n;
+   qp.amplitudes_cols = n;
+   qp.entanglement_size = n;
+   ArrayResize(qp.amplitudes, n * n);
+   ArrayResize(qp.entanglement, n * n);
    ArrayResize(qp.optimalWeights, n);
    
+   // Initialize with equal superposition
    for(int i = 0; i < n; i++)
    {
-      ArrayResize(qp.amplitudes[i], n);
-      ArrayResize(qp.entanglement[i], n);
-      
-      // Initialize with equal superposition
       for(int j = 0; j < n; j++)
-         qp.amplitudes[i][j] = 1.0 / MathSqrt(n);
+         qp.amplitudes[i * n + j] = 1.0 / MathSqrt(n);
    }
    
    // Calculate entanglement matrix (correlation-based)
-   CalculateEntanglement(returns, qp.entanglement);
+   CalculateEntanglement(returns, returns_rows, returns_cols, qp.entanglement, qp.entanglement_size);
    
    // Quantum annealing simulation
    double temperature = 1.0;
@@ -259,7 +266,7 @@ void OptimizeQuantumPortfolio(string symbols[], double returns[][],
       EvolveQuantumState(qp, temperature);
       
       // Measure coherence
-      qp.coherence = MeasureCoherence(qp.amplitudes);
+      qp.coherence = MeasureCoherence(qp.amplitudes, qp.amplitudes_rows, qp.amplitudes_cols);
       
       // Apply decoherence
       ApplyDecoherence(qp, temperature);
@@ -278,22 +285,63 @@ void OptimizeQuantumPortfolio(string symbols[], double returns[][],
 //+------------------------------------------------------------------+
 //| Calculate quantum entanglement                                   |
 //+------------------------------------------------------------------+
-void CalculateEntanglement(const double &returns[][], double &entanglement[][])
+void CalculateEntanglement(const double &returns[], int returns_rows, int returns_cols,
+                          double &entanglement[], int entanglement_size)
 {
-   int n = ArraySize(returns);
+   int n = returns_rows;
    
    for(int i = 0; i < n; i++)
    {
       for(int j = 0; j < n; j++)
       {
+         // Extract row data for correlation calculation
+         double row_i[], row_j[];
+         ArrayResize(row_i, returns_cols);
+         ArrayResize(row_j, returns_cols);
+         
+         for(int k = 0; k < returns_cols; k++)
+         {
+            row_i[k] = returns[i * returns_cols + k];
+            row_j[k] = returns[j * returns_cols + k];
+         }
+         
          // Quantum correlation (includes non-linear dependencies)
-         double linearCorr = CalculateCorrelation(returns[i], returns[j]);
-         double mutualInfo = CalculateMutualInformation(returns[i], returns[j]);
+         double linearCorr = CalculateCorrelation(row_i, row_j);
+         double mutualInfo = CalculateMutualInformation(row_i, row_j);
          
          // Entanglement strength
-         entanglement[i][j] = linearCorr * 0.7 + mutualInfo * 0.3;
+         entanglement[i * entanglement_size + j] = linearCorr * 0.7 + mutualInfo * 0.3;
       }
    }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate correlation between two arrays                         |
+//+------------------------------------------------------------------+
+double CalculateCorrelation(const double &x[], const double &y[])
+{
+   int n = MathMin(ArraySize(x), ArraySize(y));
+   if(n == 0) return 0;
+   
+   double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+   
+   for(int i = 0; i < n; i++)
+   {
+      sumX += x[i];
+      sumY += y[i];
+      sumXY += x[i] * y[i];
+      sumX2 += x[i] * x[i];
+      sumY2 += y[i] * y[i];
+   }
+   
+   double meanX = sumX / n;
+   double meanY = sumY / n;
+   
+   double numerator = sumXY - n * meanX * meanY;
+   double denominator = MathSqrt((sumX2 - n * meanX * meanX) * (sumY2 - n * meanY * meanY));
+   
+   if(denominator == 0) return 0;
+   return numerator / denominator;
 }
 
 //+------------------------------------------------------------------+
@@ -306,10 +354,11 @@ double CalculateMutualInformation(const double &x[], const double &y[])
    double mi = 0;
    
    // Create joint histogram
-   double hist2d[][];
-   ArrayResize(hist2d, bins);
-   for(int i = 0; i < bins; i++)
-      ArrayResize(hist2d[i], bins);
+   double hist2d[];
+   ArrayResize(hist2d, bins * bins);
+   // Initialize to zero
+   for(int i = 0; i < bins * bins; i++)
+      hist2d[i] = 0;
    
    // Fill histogram
    double xMin = x[ArrayMinimum(x)];
@@ -321,7 +370,7 @@ double CalculateMutualInformation(const double &x[], const double &y[])
    {
       int xBin = (int)((x[i] - xMin) / (xMax - xMin) * (bins - 1));
       int yBin = (int)((y[i] - yMin) / (yMax - yMin) * (bins - 1));
-      hist2d[xBin][yBin]++;
+      hist2d[xBin * bins + yBin]++;
    }
    
    // Calculate MI
@@ -355,50 +404,46 @@ double CalculateMutualInformation(const double &x[], const double &y[])
 //+------------------------------------------------------------------+
 void EvolveQuantumState(QuantumPortfolio &qp, double temperature)
 {
-   int n = ArraySize(qp.amplitudes);
+   int n = qp.amplitudes_rows;
    
    // Quantum walk on portfolio space
-   double newAmplitudes[][];
-   ArrayResize(newAmplitudes, n);
+   double newAmplitudes[];
+   ArrayResize(newAmplitudes, n * n);
    
    for(int i = 0; i < n; i++)
    {
-      ArrayResize(newAmplitudes[i], n);
-      
       for(int j = 0; j < n; j++)
       {
-         complex<double> amp = 0;
+         complex<double> amp(0, 0);
          
          // Interference from entangled states
          for(int k = 0; k < n; k++)
          {
-            double phase = qp.entanglement[j][k] * M_PI * temperature;
-            amp += qp.amplitudes[i][k] * complex<double>(MathCos(phase), MathSin(phase));
+            double phase = qp.entanglement[j * n + k] * M_PI * temperature;
+            amp = amp + qp.amplitudes[i * n + k] * complex<double>(MathCos(phase), MathSin(phase));
          }
          
-         newAmplitudes[i][j] = abs(amp);
+         newAmplitudes[i * n + j] = abs(amp);
       }
    }
    
    // Normalize
    double norm = 0;
-   for(int i = 0; i < n; i++)
-      for(int j = 0; j < n; j++)
-         norm += newAmplitudes[i][j] * newAmplitudes[i][j];
+   for(int i = 0; i < n * n; i++)
+      norm += newAmplitudes[i] * newAmplitudes[i];
    
    norm = MathSqrt(norm);
    
-   for(int i = 0; i < n; i++)
-      for(int j = 0; j < n; j++)
-         qp.amplitudes[i][j] = newAmplitudes[i][j] / norm;
+   for(int i = 0; i < n * n; i++)
+      qp.amplitudes[i] = newAmplitudes[i] / norm;
 }
 
 //+------------------------------------------------------------------+
 //| Measure quantum coherence                                        |
 //+------------------------------------------------------------------+
-double MeasureCoherence(const double &amplitudes[][])
+double MeasureCoherence(const double &amplitudes[], int rows, int cols)
 {
-   int n = ArraySize(amplitudes);
+   int n = rows;
    double coherence = 0;
    
    // Off-diagonal sum (quantum coherence measure)
@@ -407,7 +452,7 @@ double MeasureCoherence(const double &amplitudes[][])
       for(int j = 0; j < n; j++)
       {
          if(i != j)
-            coherence += MathAbs(amplitudes[i][j]);
+            coherence += MathAbs(amplitudes[i * cols + j]);
       }
    }
    
@@ -419,7 +464,7 @@ double MeasureCoherence(const double &amplitudes[][])
 //+------------------------------------------------------------------+
 void ApplyDecoherence(QuantumPortfolio &qp, double temperature)
 {
-   int n = ArraySize(qp.amplitudes);
+   int n = qp.amplitudes_rows;
    qp.decoherence = 0.1 * (1 - temperature);  // Increases as temperature drops
    
    // Dephasing
@@ -429,7 +474,7 @@ void ApplyDecoherence(QuantumPortfolio &qp, double temperature)
       {
          if(i != j)
          {
-            qp.amplitudes[i][j] *= (1 - qp.decoherence);
+            qp.amplitudes[i * n + j] *= (1 - qp.decoherence);
          }
       }
    }
@@ -440,7 +485,7 @@ void ApplyDecoherence(QuantumPortfolio &qp, double temperature)
 //+------------------------------------------------------------------+
 void CollapseQuantumState(QuantumPortfolio &qp)
 {
-   int n = ArraySize(qp.amplitudes);
+   int n = qp.amplitudes_rows;
    
    // Calculate measurement probabilities
    double probs[];
@@ -450,7 +495,7 @@ void CollapseQuantumState(QuantumPortfolio &qp)
    {
       probs[i] = 0;
       for(int j = 0; j < n; j++)
-         probs[i] += qp.amplitudes[i][j] * qp.amplitudes[i][j];
+         probs[i] += qp.amplitudes[i * n + j] * qp.amplitudes[i * n + j];
    }
    
    // Set optimal weights
@@ -517,23 +562,27 @@ void CreateSyntheticAsset(string targetAsset, string availableAssets[],
 {
    // Get returns data
    double targetReturns[];
-   double assetReturns[][];
+   double assetReturns[];
+   int num_assets = ArraySize(availableAssets);
+   int num_periods = 100;
    
-   GetReturnsData(targetAsset, targetReturns, 100);
-   ArrayResize(assetReturns, ArraySize(availableAssets));
+   GetReturnsData(targetAsset, targetReturns, num_periods);
+   ArrayResize(assetReturns, num_assets * num_periods);
    
-   for(int i = 0; i < ArraySize(availableAssets); i++)
+   for(int i = 0; i < num_assets; i++)
    {
       double returns[];
-      GetReturnsData(availableAssets[i], returns, 100);
-      ArrayCopy(assetReturns[i], returns);
+      GetReturnsData(availableAssets[i], returns, num_periods);
+      // Copy returns to flattened array
+      for(int j = 0; j < num_periods; j++)
+         assetReturns[i * num_periods + j] = returns[j];
    }
    
    // Optimize replication portfolio (least squares)
-   OptimizeReplication(targetReturns, assetReturns, synthetic.weights);
+   OptimizeReplication(targetReturns, assetReturns, num_assets, num_periods, synthetic.weights);
    
    // Calculate tracking error
-   synthetic.trackingError = CalculateTrackingError(targetReturns, assetReturns, 
+   synthetic.trackingError = CalculateTrackingError(targetReturns, assetReturns, num_assets, num_periods,
                                                    synthetic.weights);
    
    // Calculate Greeks if option-like
@@ -561,11 +610,11 @@ void GetReturnsData(string symbol, double &returns[], int periods)
 //+------------------------------------------------------------------+
 //| Optimize replication weights                                     |
 //+------------------------------------------------------------------+
-void OptimizeReplication(const double &target[], const double &assets[][],
+void OptimizeReplication(const double &target[], const double &assets[], int num_assets, int num_periods,
                         double &weights[])
 {
-   int n = ArraySize(assets);
-   int m = ArraySize(target);
+   int n = num_assets;
+   int m = num_periods;
    ArrayResize(weights, n);
    
    // Simplified: equal weight
@@ -578,17 +627,17 @@ void OptimizeReplication(const double &target[], const double &assets[][],
 //+------------------------------------------------------------------+
 //| Calculate tracking error                                         |
 //+------------------------------------------------------------------+
-double CalculateTrackingError(const double &target[], const double &assets[][],
+double CalculateTrackingError(const double &target[], const double &assets[], int num_assets, int num_periods,
                              const double &weights[])
 {
    double error = 0;
-   int m = ArraySize(target);
+   int m = num_periods;
    
    for(int i = 0; i < m; i++)
    {
       double replicatedReturn = 0;
       for(int j = 0; j < ArraySize(weights); j++)
-         replicatedReturn += weights[j] * assets[j][i];
+         replicatedReturn += weights[j] * assets[j * num_periods + i];
       
       error += MathPow(target[i] - replicatedReturn, 2);
    }
@@ -817,6 +866,37 @@ void CalculateBehavioralSignals(string symbol, BehavioralSignals &signals)
 }
 
 //+------------------------------------------------------------------+
+//| Calculate volatility                                             |
+//+------------------------------------------------------------------+
+double CalculateVolatility(const double &prices[], int period)
+{
+   if(period < 2 || ArraySize(prices) < period) return 0;
+   
+   double returns[];
+   ArrayResize(returns, period - 1);
+   
+   for(int i = 0; i < period - 1; i++)
+   {
+      if(prices[i+1] > 0 && prices[i] > 0)
+         returns[i] = MathLog(prices[i] / prices[i+1]);
+      else
+         returns[i] = 0;
+   }
+   
+   double mean = 0;
+   for(int i = 0; i < ArraySize(returns); i++)
+      mean += returns[i];
+   mean /= ArraySize(returns);
+   
+   double variance = 0;
+   for(int i = 0; i < ArraySize(returns); i++)
+      variance += MathPow(returns[i] - mean, 2);
+   variance /= ArraySize(returns);
+   
+   return MathSqrt(variance);
+}
+
+//+------------------------------------------------------------------+
 //| Detect herding behavior                                          |
 //+------------------------------------------------------------------+
 double DetectHerding(const double &close[], const long &volume[])
@@ -979,16 +1059,16 @@ double CalculateRecencyBias(const double &close[])
 void RunGeneticOptimization(GeneticOptimizer &ga, int numParams, int popSize)
 {
    // Initialize population
-   ArrayResize(ga.population, popSize);
+   ga.population_size = popSize;
+   ga.num_params = numParams;
+   ArrayResize(ga.population, popSize * numParams);
    ArrayResize(ga.fitness, popSize);
    
+   // Random initialization
    for(int i = 0; i < popSize; i++)
    {
-      ArrayResize(ga.population[i], numParams);
-      
-      // Random initialization
       for(int j = 0; j < numParams; j++)
-         ga.population[i][j] = MathRand() / 32767.0;
+         ga.population[i * numParams + j] = MathRand() / 32767.0;
    }
    
    ga.generation = 0;
@@ -1004,11 +1084,12 @@ void RunGeneticOptimization(GeneticOptimizer &ga, int numParams, int popSize)
       EvaluatePopulation(ga);
       
       // Selection
-      int parents[][];
-      SelectParents(ga, parents);
+      int parents[];
+      int num_parents;
+      SelectParents(ga, parents, num_parents);
       
       // Crossover
-      CreateOffspring(ga, parents);
+      CreateOffspring(ga, parents, num_parents);
       
       // Mutation
       MutatePopulation(ga);
@@ -1025,10 +1106,16 @@ void RunGeneticOptimization(GeneticOptimizer &ga, int numParams, int popSize)
 //+------------------------------------------------------------------+
 void EvaluatePopulation(GeneticOptimizer &ga)
 {
-   for(int i = 0; i < ArraySize(ga.population); i++)
+   for(int i = 0; i < ga.population_size; i++)
    {
+      // Extract individual parameters
+      double params[];
+      ArrayResize(params, ga.num_params);
+      for(int j = 0; j < ga.num_params; j++)
+         params[j] = ga.population[i * ga.num_params + j];
+      
       // Fitness = Sharpe ratio of strategy with these parameters
-      ga.fitness[i] = EvaluateStrategyFitness(ga.population[i]);
+      ga.fitness[i] = EvaluateStrategyFitness(params);
    }
 }
 
@@ -1045,21 +1132,19 @@ double EvaluateStrategyFitness(const double &params[])
 //+------------------------------------------------------------------+
 //| Select parents for breeding                                      |
 //+------------------------------------------------------------------+
-void SelectParents(const GeneticOptimizer &ga, int &parents[][])
+void SelectParents(const GeneticOptimizer &ga, int &parents[], int &num_parents)
 {
-   int popSize = ArraySize(ga.population);
-   int numParents = (int)(popSize * (1 - ga.elitismRate));
+   int popSize = ga.population_size;
+   num_parents = (int)(popSize * (1 - ga.elitismRate));
    
-   ArrayResize(parents, numParents);
+   ArrayResize(parents, num_parents * 2);  // Each parent pair has 2 indices
    
    // Tournament selection
-   for(int i = 0; i < numParents; i++)
+   for(int i = 0; i < num_parents; i++)
    {
-      ArrayResize(parents[i], 2);
-      
       // Select two parents via tournament
-      parents[i][0] = TournamentSelect(ga.fitness, 3);
-      parents[i][1] = TournamentSelect(ga.fitness, 3);
+      parents[i * 2] = TournamentSelect(ga.fitness, 3);
+      parents[i * 2 + 1] = TournamentSelect(ga.fitness, 3);
    }
 }
 
@@ -1087,32 +1172,32 @@ int TournamentSelect(const double &fitness[], int tournamentSize)
 //+------------------------------------------------------------------+
 //| Create offspring through crossover                               |
 //+------------------------------------------------------------------+
-void CreateOffspring(GeneticOptimizer &ga, const int &parents[][])
+void CreateOffspring(GeneticOptimizer &ga, const int &parents[], int num_parents)
 {
    // Keep elite
-   int eliteSize = (int)(ArraySize(ga.population) * ga.elitismRate);
+   int eliteSize = (int)(ga.population_size * ga.elitismRate);
    
    // Sort by fitness and keep elite
    // (simplified - would properly sort)
    
    // Create offspring
-   for(int i = eliteSize; i < ArraySize(ga.population); i++)
+   for(int i = eliteSize; i < ga.population_size; i++)
    {
       int p = i - eliteSize;
-      if(p < ArraySize(parents))
+      if(p < num_parents)
       {
          // Crossover
          if(MathRand() / 32767.0 < ga.crossoverRate)
          {
-            int parent1 = parents[p][0];
-            int parent2 = parents[p][1];
+            int parent1 = parents[p * 2];
+            int parent2 = parents[p * 2 + 1];
             
             // Uniform crossover
-            for(int j = 0; j < ArraySize(ga.population[i]); j++)
+            for(int j = 0; j < ga.num_params; j++)
             {
-               ga.population[i][j] = MathRand() / 32767.0 < 0.5 ?
-                                    ga.population[parent1][j] :
-                                    ga.population[parent2][j];
+               ga.population[i * ga.num_params + j] = MathRand() / 32767.0 < 0.5 ?
+                                    ga.population[parent1 * ga.num_params + j] :
+                                    ga.population[parent2 * ga.num_params + j];
             }
          }
       }
@@ -1124,17 +1209,18 @@ void CreateOffspring(GeneticOptimizer &ga, const int &parents[][])
 //+------------------------------------------------------------------+
 void MutatePopulation(GeneticOptimizer &ga)
 {
-   int eliteSize = (int)(ArraySize(ga.population) * ga.elitismRate);
+   int eliteSize = (int)(ga.population_size * ga.elitismRate);
    
-   for(int i = eliteSize; i < ArraySize(ga.population); i++)
+   for(int i = eliteSize; i < ga.population_size; i++)
    {
-      for(int j = 0; j < ArraySize(ga.population[i]); j++)
+      for(int j = 0; j < ga.num_params; j++)
       {
          if(MathRand() / 32767.0 < ga.mutationRate)
          {
             // Gaussian mutation
-            ga.population[i][j] += rand_normal(0, 0.1);
-            ga.population[i][j] = MathMax(0, MathMin(1, ga.population[i][j]));
+            int idx = i * ga.num_params + j;
+            ga.population[idx] += rand_normal(0, 0.1);
+            ga.population[idx] = MathMax(0, MathMin(1, ga.population[idx]));
          }
       }
    }
@@ -1159,7 +1245,7 @@ void UpdateGeneticStats(GeneticOptimizer &ga)
    ga.avgFitness /= ArraySize(ga.fitness);
    
    // Calculate diversity
-   ga.diversity = CalculatePopulationDiversity(ga.population);
+   ga.diversity = CalculatePopulationDiversity(ga.population, ga.population_size, ga.num_params);
    
    // Check convergence
    if(ga.diversity < 0.01 || ga.generation > 100)
@@ -1169,10 +1255,10 @@ void UpdateGeneticStats(GeneticOptimizer &ga)
 //+------------------------------------------------------------------+
 //| Calculate population diversity                                   |
 //+------------------------------------------------------------------+
-double CalculatePopulationDiversity(const double &population[][])
+double CalculatePopulationDiversity(const double &population[], int pop_size, int num_params)
 {
    double diversity = 0;
-   int n = ArraySize(population);
+   int n = pop_size;
    
    if(n < 2) return 0;
    
@@ -1182,8 +1268,12 @@ double CalculatePopulationDiversity(const double &population[][])
       for(int j = i + 1; j < n; j++)
       {
          double dist = 0;
-         for(int k = 0; k < ArraySize(population[i]); k++)
-            dist += MathPow(population[i][k] - population[j][k], 2);
+         for(int k = 0; k < num_params; k++)
+         {
+            int idx1 = i * num_params + k;
+            int idx2 = j * num_params + k;
+            dist += MathPow(population[idx1] - population[idx2], 2);
+         }
          diversity += MathSqrt(dist);
       }
    }
@@ -1595,6 +1685,11 @@ struct complex
    {
       return complex(real * other.real - imag * other.imag,
                     real * other.imag + imag * other.real);
+   }
+   
+   complex operator*(const T &scalar) const
+   {
+      return complex(real * scalar, imag * scalar);
    }
 };
 
