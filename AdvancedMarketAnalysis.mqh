@@ -345,6 +345,11 @@ double CalculateADX(const double &high[], const double &low[], const double &clo
 //+------------------------------------------------------------------+
 double CalculateVolatility(const double &close[], int period)
 {
+   // Check array size
+   int arraySize = ArraySize(close);
+   if(arraySize < period || period < 2)
+      return 0;
+   
    double returns[];
    ArrayResize(returns, period - 1);
    
@@ -520,8 +525,18 @@ void CalculateCorrelation(string symbol1, string symbol2, int period, Correlatio
    ArraySetAsSeries(close1, true);
    ArraySetAsSeries(close2, true);
    
-   CopyClose(symbol1, PERIOD_CURRENT, 0, period, close1);
-   CopyClose(symbol2, PERIOD_CURRENT, 0, period, close2);
+   int copied1 = CopyClose(symbol1, PERIOD_CURRENT, 0, period, close1);
+   int copied2 = CopyClose(symbol2, PERIOD_CURRENT, 0, period, close2);
+   
+   // Check if we got enough data
+   if(copied1 < period || copied2 < period)
+   {
+      corr.correlation = 0;
+      corr.beta = 0;
+      corr.spreadMean = 0;
+      corr.spreadStdDev = 0;
+      return;
+   }
    
    // Calculate returns
    double returns1[], returns2[];
@@ -595,6 +610,11 @@ void CalculateCorrelation(string symbol1, string symbol2, int period, Correlatio
 //+------------------------------------------------------------------+
 double CalculateSpreadHalfLife(const double &spread[], int period)
 {
+   // Check array size
+   int arraySize = ArraySize(spread);
+   if(arraySize < period || period < 2)
+      return 0;
+   
    // Ornstein-Uhlenbeck process
    double y[], x[];
    ArrayResize(y, period - 1);
@@ -899,6 +919,16 @@ void CalculateOrderFlow(string symbol, OrderFlowAnalysis &flow)
 //+------------------------------------------------------------------+
 void CalculateAbsorptionInitiative(const MqlTick &ticks[], int count, OrderFlowAnalysis &flow)
 {
+   // Check minimum array size
+   if(count < 2)
+   {
+      flow.buyInitiative = 0;
+      flow.sellInitiative = 0;
+      flow.buyResponsive = 0;
+      flow.sellResponsive = 0;
+      return;
+   }
+   
    double buyInitiative = 0, sellInitiative = 0;
    double buyResponsive = 0, sellResponsive = 0;
    

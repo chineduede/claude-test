@@ -470,6 +470,14 @@ void EstimateDarkPoolActivity(const MqlTick &ticks[], int count, HiddenLiquidity
 //+------------------------------------------------------------------+
 void AnalyzeHiddenPressure(const MqlTick &ticks[], int count, HiddenLiquidity &liquidity)
 {
+   // Check minimum array size
+   if(count < 3)
+   {
+      liquidity.hiddenBuyPressure = 0;
+      liquidity.hiddenSellPressure = 0;
+      return;
+   }
+   
    // Detect buy/sell pressure from micro patterns
    double buyPressure = 0;
    double sellPressure = 0;
@@ -493,6 +501,10 @@ void AnalyzeHiddenPressure(const MqlTick &ticks[], int count, HiddenLiquidity &l
 //+------------------------------------------------------------------+
 double DetectLiquidityMirage(const MqlTick &ticks[], int count)
 {
+   // Check minimum array size
+   if(count < 3)
+      return 0;
+   
    // Detect fake liquidity (orders that disappear when approached)
    int quickCancels = 0;
    int totalOrders = 0;
@@ -692,6 +704,13 @@ void DetectHFTPatterns(string symbol, OrderBookDynamics &dynamics)
 //+------------------------------------------------------------------+
 void DetectFrontRunning(const MqlTick &ticks[], int count, OrderBookDynamics &dynamics)
 {
+   // Check minimum array size
+   if(count < 3)
+   {
+      dynamics.frontRunning = 0;
+      return;
+   }
+   
    // Look for patterns of small orders followed by large orders
    int frontRunPatterns = 0;
    
@@ -898,7 +917,11 @@ double CalculateVolatility(string symbol, int periods)
 {
    double close[];
    ArraySetAsSeries(close, true);
-   CopyClose(symbol, PERIOD_M1, 0, periods, close);
+   int copied = CopyClose(symbol, PERIOD_M1, 0, periods, close);
+   
+   // Check if we got enough data
+   if(copied < periods)
+      return 0;
    
    double returns[];
    ArrayResize(returns, periods - 1);
@@ -1603,28 +1626,40 @@ void AnalyzeTickPatterns(const MqlTick &ticks[], int count, HFMicrostructure &hf
    
    // Tick momentum
    int momentum = 0;
-   for(int i = 1; i < MathMin(count, 20); i++)
+   int momentumCount = MathMin(count - 1, 19);  // Max 19 comparisons, ensure we don't exceed array
+   
+   if(count >= 2)  // Need at least 2 ticks
    {
-      if(ticks[i].bid > ticks[i-1].bid)
-         momentum++;
-      else if(ticks[i].bid < ticks[i-1].bid)
-         momentum--;
+      for(int i = 1; i <= momentumCount; i++)
+      {
+         if(ticks[i].bid > ticks[i-1].bid)
+            momentum++;
+         else if(ticks[i].bid < ticks[i-1].bid)
+            momentum--;
+      }
    }
    
-   hf.tickMomentum = (double)momentum / 20;
+   hf.tickMomentum = momentumCount > 0 ? (double)momentum / momentumCount : 0;
    
    // Tick reversal probability
    int reversals = 0;
-   for(int i = 2; i < count; i++)
+   if(count >= 3)  // Need at least 3 ticks
    {
-      bool wasUp = ticks[i-1].bid > ticks[i-2].bid;
-      bool isDown = ticks[i].bid < ticks[i-1].bid;
+      for(int i = 2; i < count; i++)
+      {
+         bool wasUp = ticks[i-1].bid > ticks[i-2].bid;
+         bool isDown = ticks[i].bid < ticks[i-1].bid;
+         
+         if(wasUp && isDown || !wasUp && !isDown)
+            reversals++;
+      }
       
-      if(wasUp && isDown || !wasUp && !isDown)
-         reversals++;
+      hf.tickReversal = (double)reversals / (count - 2);
    }
-   
-   hf.tickReversal = (double)reversals / (count - 2);
+   else
+   {
+      hf.tickReversal = 0;
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -1632,6 +1667,15 @@ void AnalyzeTickPatterns(const MqlTick &ticks[], int count, HFMicrostructure &hf
 //+------------------------------------------------------------------+
 void AnalyzeQuoteDynamics(const MqlTick &ticks[], int count, HFMicrostructure &hf)
 {
+   // Check minimum array size
+   if(count < 2)
+   {
+      hf.quoteIntensity = 0;
+      hf.bidAskBounce = 0;
+      hf.spreadPersistence = 0;
+      return;
+   }
+   
    // Quote update frequency
    int quoteUpdates = 0;
    double totalTime = (ticks[count-1].time - ticks[0].time) / 1000.0;  // In seconds
@@ -1642,7 +1686,7 @@ void AnalyzeQuoteDynamics(const MqlTick &ticks[], int count, HFMicrostructure &h
          quoteUpdates++;
    }
    
-   hf.quoteIntensity = quoteUpdates / totalTime;  // Updates per second
+   hf.quoteIntensity = totalTime > 0 ? quoteUpdates / totalTime : 0;  // Updates per second
    
    // Quote lifetime
    double totalLifetime = 0;
@@ -1834,20 +1878,28 @@ void AdjustForPerformance(MetaStrategy &meta)
    for(int i = 0; i < 4; i++)
    {
       int historySize = 30;  // Assume 30 periods of history per strategy
-      int strategySize = ArraySize(meta.strategyReturns) / 4;
-      if(strategySize >= 20)
+      int totalSize = ArraySize(meta.strategyReturns);
+      int baseIdx = i * historySize;
+      
+      // Check if we have enough data for this strategy
+      if(totalSize >= baseIdx + 20)  // Need at least 20 periods for this strategy
       {
          double recentReturn = 0;
          double olderReturn = 0;
          
          // Last 10 periods
-         int baseIdx = i * historySize;
          for(int j = 0; j < 10; j++)
-            recentReturn += meta.strategyReturns[baseIdx + j];
+         {
+            if(baseIdx + j < totalSize)
+               recentReturn += meta.strategyReturns[baseIdx + j];
+         }
          
          // Previous 10 periods
          for(int j = 10; j < 20; j++)
-            olderReturn += meta.strategyReturns[baseIdx + j];
+         {
+            if(baseIdx + j < totalSize)
+               olderReturn += meta.strategyReturns[baseIdx + j];
+         }
          
          perfMomentum[i] = recentReturn - olderReturn;
       }

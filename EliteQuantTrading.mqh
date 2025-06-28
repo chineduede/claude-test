@@ -605,7 +605,14 @@ void GetReturnsData(string symbol, double &returns[], int periods)
 {
    double close[];
    ArraySetAsSeries(close, true);
-   CopyClose(symbol, PERIOD_H1, 0, periods + 1, close);
+   int copied = CopyClose(symbol, PERIOD_H1, 0, periods + 1, close);
+   
+   // Check if we got enough data
+   if(copied < periods + 1)
+   {
+      ArrayResize(returns, 0);
+      return;
+   }
    
    ArrayResize(returns, periods);
    for(int i = 0; i < periods; i++)
@@ -910,6 +917,13 @@ double CalculateVolatility(const double &prices[], int period)
 //+------------------------------------------------------------------+
 double DetectHerding(const double &close[], const long &volume[])
 {
+   // Check array sizes
+   int closeSize = ArraySize(close);
+   int volumeSize = ArraySize(volume);
+   
+   if(closeSize < 21 || volumeSize < 20)
+      return 0;
+   
    // Measure directional volume clustering
    int upDays = 0, downDays = 0;
    double upVolume = 0, downVolume = 0;
@@ -957,6 +971,17 @@ double DetectAnchoring(double price)
 //+------------------------------------------------------------------+
 void CalculateSentimentExtremes(const double &close[], BehavioralSignals &signals)
 {
+   // Check array size
+   int arraySize = ArraySize(close);
+   if(arraySize < 252)
+   {
+      signals.euphoria = 0;
+      signals.panic = 0;
+      signals.complacency = 0;
+      signals.capitulation = 0;
+      return;
+   }
+   
    // 52-week high/low
    double highest = close[ArrayMaximum(close, 0, 252)];
    double lowest = close[ArrayMinimum(close, 0, 252)];
@@ -995,7 +1020,11 @@ double DetectDispositionEffect(const double &close[])
    int quickProfits = 0;
    int heldLosses = 0;
    
-   for(int i = 1; i < 50; i++)
+   int arraySize = ArraySize(close);
+   if(arraySize < 55) return 0;  // Need at least 55 elements
+   
+   // Adjust loop bounds to ensure safe array access
+   for(int i = 5; i < MathMin(50, arraySize - 5); i++)
    {
       // Profitable move
       if(close[i] > close[i+5])
@@ -1013,7 +1042,8 @@ double DetectDispositionEffect(const double &close[])
       }
    }
    
-   return (double)(quickProfits + heldLosses) / 50 * 100;
+   int totalChecks = MathMin(45, arraySize - 10);  // Adjusted for actual checks performed
+   return totalChecks > 0 ? (double)(quickProfits + heldLosses) / totalChecks * 100 : 0;
 }
 
 //+------------------------------------------------------------------+
@@ -1021,11 +1051,17 @@ double DetectDispositionEffect(const double &close[])
 //+------------------------------------------------------------------+
 double CalculateLossAversion(const double &close[])
 {
+   // Check array size
+   int arraySize = ArraySize(close);
+   if(arraySize < 101)
+      return 0;
+   
    // Asymmetric volatility (higher on down moves)
    double upVol = 0, downVol = 0;
    int upCount = 0, downCount = 0;
    
-   for(int i = 1; i < 100; i++)
+   int maxIndex = MathMin(100, arraySize - 1);
+   for(int i = 1; i < maxIndex; i++)
    {
       double ret = MathLog(close[i] / close[i+1]);
       
@@ -1053,6 +1089,11 @@ double CalculateLossAversion(const double &close[])
 //+------------------------------------------------------------------+
 double CalculateRecencyBias(const double &close[])
 {
+   // Check array size
+   int arraySize = ArraySize(close);
+   if(arraySize < 51)
+      return 0;
+   
    // Compare recent vs historical returns
    double recentReturn = (close[0] - close[5]) / close[5];
    double historicalReturn = (close[0] - close[50]) / close[50] / 10;  // Normalized

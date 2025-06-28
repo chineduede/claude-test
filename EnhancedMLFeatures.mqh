@@ -69,15 +69,19 @@ ENUM_MARKET_REGIME GetMarketRegime(string symbol, ENUM_TIMEFRAMES timeframe)
    ArraySetAsSeries(minus_di, true);
    
    int adx_handle = iADX(symbol, timeframe, 14);
-   CopyBuffer(adx_handle, 0, 0, 50, adx);
-   CopyBuffer(adx_handle, 1, 0, 50, plus_di);
-   CopyBuffer(adx_handle, 2, 0, 50, minus_di);
+   int adx_copied = CopyBuffer(adx_handle, 0, 0, 50, adx);
+   int plus_copied = CopyBuffer(adx_handle, 1, 0, 50, plus_di);
+   int minus_copied = CopyBuffer(adx_handle, 2, 0, 50, minus_di);
    
    // Calculate ATR for volatility
    double atr[];
    ArraySetAsSeries(atr, true);
    int atr_handle = iATR(symbol, timeframe, 14);
-   CopyBuffer(atr_handle, 0, 0, 50, atr);
+   int atr_copied = CopyBuffer(atr_handle, 0, 0, 50, atr);
+   
+   // Check if we have enough data
+   if(adx_copied < 50 || plus_copied < 50 || minus_copied < 50 || atr_copied < 50)
+      return REGIME_RANGING;  // Default to ranging if insufficient data
    
    // Determine regime
    double avg_adx = 0;
@@ -243,7 +247,11 @@ double GetVolatilityAdjustedSize(string symbol, double base_risk_percent)
    double atr[];
    ArraySetAsSeries(atr, true);
    int atr_handle = iATR(symbol, _Period, 14);
-   CopyBuffer(atr_handle, 0, 0, 100, atr);
+   int copied = CopyBuffer(atr_handle, 0, 0, 100, atr);
+   
+   // Check if we have enough data
+   if(copied < 100)
+      return base_risk_percent;  // Return base risk if insufficient data
    
    double current_atr = atr[0];
    double avg_atr = 0;
@@ -287,14 +295,21 @@ void CalculateEnhancedFeatures(string symbol, EnhancedFeatures &features)
    // Volume analysis
    long volume[];
    ArraySetAsSeries(volume, true);
-   CopyTickVolume(symbol, _Period, 0, 50, volume);
+   int vol_copied = CopyTickVolume(symbol, _Period, 0, 50, volume);
    
-   double avg_volume = 0;
-   for(int i = 10; i < 50; i++)
-      avg_volume += volume[i];
-   avg_volume /= 40;
-   
-   features.relativeVolume = volume[0] / avg_volume;
+   if(vol_copied < 50)
+   {
+      features.relativeVolume = 1.0;  // Default if insufficient data
+   }
+   else
+   {
+      double avg_volume = 0;
+      for(int i = 10; i < 50; i++)
+         avg_volume += volume[i];
+      avg_volume /= 40;
+      
+      features.relativeVolume = avg_volume > 0 ? volume[0] / avg_volume : 1.0;
+   }
    
    // Spread analysis
    double current_spread = SymbolInfoInteger(symbol, SYMBOL_SPREAD);
@@ -304,16 +319,23 @@ void CalculateEnhancedFeatures(string symbol, EnhancedFeatures &features)
    double rsi[];
    ArraySetAsSeries(rsi, true);
    int rsi_handle = iRSI(symbol, _Period, 14, PRICE_CLOSE);
-   CopyBuffer(rsi_handle, 0, 0, 50, rsi);
+   int rsi_copied = CopyBuffer(rsi_handle, 0, 0, 50, rsi);
    
    // Simple divergence check
-   double price_change = (iClose(symbol, _Period, 0) - iClose(symbol, _Period, 10)) / iClose(symbol, _Period, 10);
-   double rsi_change = rsi[0] - rsi[10];
+   if(rsi_copied >= 11)  // Need at least 11 values to check rsi[10]
+   {
+      double price_change = (iClose(symbol, _Period, 0) - iClose(symbol, _Period, 10)) / iClose(symbol, _Period, 10);
+      double rsi_change = rsi[0] - rsi[10];
    
-   if((price_change > 0 && rsi_change < 0) || (price_change < 0 && rsi_change > 0))
-      features.rsiDivergence = MathAbs(price_change - rsi_change/100);
+      if((price_change > 0 && rsi_change < 0) || (price_change < 0 && rsi_change > 0))
+         features.rsiDivergence = MathAbs(price_change - rsi_change/100);
+      else
+         features.rsiDivergence = 0;
+   }
    else
+   {
       features.rsiDivergence = 0;
+   }
    
    // Bollinger Bands position
    double bb_upper[], bb_lower[], bb_middle[];
@@ -341,16 +363,23 @@ void CalculateEnhancedFeatures(string symbol, EnhancedFeatures &features)
    
    // Volume profile indicator
    double vol_sum_upper = 0, vol_sum_lower = 0;
-   for(int i = 0; i < 20; i++)
+   if(vol_copied >= 20 && ArraySize(bb_middle) > 0)  // Check we have enough volume data and BB data
    {
-      double price = iClose(symbol, _Period, i);
-      double vol = (double)volume[i];
-      if(price > bb_middle[0])
-         vol_sum_upper += vol;
-      else
-         vol_sum_lower += vol;
+      for(int i = 0; i < 20; i++)
+      {
+         double price = iClose(symbol, _Period, i);
+         double vol = (double)volume[i];
+         if(price > bb_middle[0])
+            vol_sum_upper += vol;
+         else
+            vol_sum_lower += vol;
+      }
+      features.volumeProfile = vol_sum_upper > 0 ? vol_sum_lower / vol_sum_upper : 1.0;
    }
-   features.volumeProfile = vol_sum_upper > 0 ? vol_sum_lower / vol_sum_upper : 1.0;
+   else
+   {
+      features.volumeProfile = 1.0;
+   }
    
    // ATR position
    double atr[];
