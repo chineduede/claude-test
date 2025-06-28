@@ -121,6 +121,9 @@ struct StatisticalData
    double hurst;          // Hurst exponent (trend vs mean reversion)
 };
 
+//--- Forward declarations
+double CalculateNeuralNetworkScore(const ReversionSignal &signal);
+
 //--- Global variables
 MeanReversionMLModel mlModel;
 ReversionSignal currentSignals[];
@@ -441,7 +444,8 @@ void ScanReversionSignals()
    ArrayResize(currentSignals, 0);
    
    // Get indicator values
-   double close[], high[], low[], volume[];
+   double close[], high[], low[];
+   long volume[];
    double bb_upper[], bb_middle[], bb_lower[];
    double rsi[];
    
@@ -487,7 +491,7 @@ void ScanReversionSignals()
       signal.zScore = statistics[0].currentZScore;
       
       // Check for various reversion patterns
-      ENUM_REVERSION_PATTERN pattern = DetectReversionPattern(i, close, bb_upper, bb_middle, 
+      ENUM_REVERSION_PATTERN pattern = DetectReversionPattern(i, close, high, low, bb_upper, bb_middle, 
                                                              bb_lower, rsi, volume);
       
       if(pattern != REV_PATTERN_NONE)
@@ -532,6 +536,7 @@ void ScanReversionSignals()
 //| Detect reversion patterns                                        |
 //+------------------------------------------------------------------+
 ENUM_REVERSION_PATTERN DetectReversionPattern(int bar, const double &close[],
+                                             const double &high[], const double &low[],
                                              const double &bb_upper[], const double &bb_middle[],
                                              const double &bb_lower[], const double &rsi[],
                                              const long &volume[])
@@ -1061,12 +1066,18 @@ bool ValidateReversionSetup(const ReversionSignal &signal, const MarketContext &
    // Check volume if filter enabled
    if(InpUseVolumeFilter)
    {
-      double volume[];
+      long volume[];
       ArraySetAsSeries(volume, true);
       CopyTickVolume(_Symbol, _Period, 0, 20, volume);
       
-      double avgVolume = CalculateMean(volume, 5, 15);
-      if(volume[0] < avgVolume * InpMinVolumeRatio)
+      // Convert long volume to double for calculation
+      double volumeDouble[];
+      ArrayResize(volumeDouble, ArraySize(volume));
+      for(int i = 0; i < ArraySize(volume); i++)
+         volumeDouble[i] = (double)volume[i];
+      
+      double avgVolume = CalculateMean(volumeDouble, 5, 15);
+      if((double)volume[0] < avgVolume * InpMinVolumeRatio)
          return false;
    }
    
@@ -1811,6 +1822,7 @@ void ExecuteReversionTradeEnhanced(const ReversionSignal &signal)
    
    // Use adaptive stop loss system
    double stopLoss;
+   double stopDistance = 0;  // Declare at function level
    if(g_adaptiveStop.averageReward > 0)
    {
       stopLoss = UpdateAdaptiveStopLoss(_Symbol, entryPrice, signal.direction, g_adaptiveStop);
@@ -1836,7 +1848,7 @@ void ExecuteReversionTradeEnhanced(const ReversionSignal &signal)
             stopMultiplier *= 1.2;
       }
       
-      double stopDistance = atr * stopMultiplier;
+      stopDistance = atr * stopMultiplier;
       stopLoss = signal.direction > 0 ?
                 entryPrice - stopDistance :
                 entryPrice + stopDistance;
@@ -1874,7 +1886,7 @@ void ExecuteReversionTradeEnhanced(const ReversionSignal &signal)
       }
       
       // Adjust if too close to entry
-      double stopDistance = MathAbs(stopLoss - entryPrice);
+      stopDistance = MathAbs(stopLoss - entryPrice);
       double tpDistance = MathAbs(takeProfit - entryPrice);
       if(tpDistance < stopDistance * 0.5)
       {
@@ -2088,17 +2100,22 @@ void UpdateEliteAnalysis()
    string symbols[] = {_Symbol};
    if(ArraySize(symbols) > 1)
    {
-      double returns[][];
+      double returns[];  // Flattened 2D array
+      int num_periods = 100;
+      int num_symbols = ArraySize(symbols);
+      
       // Get returns data
-      ArrayResize(returns, ArraySize(symbols));
-      for(int i = 0; i < ArraySize(symbols); i++)
+      ArrayResize(returns, num_symbols * num_periods);
+      for(int i = 0; i < num_symbols; i++)
       {
          double ret[];
-         GetReturnsData(symbols[i], ret, 100);
-         ArrayCopy(returns[i], ret);
+         GetReturnsData(symbols[i], ret, num_periods);
+         // Copy to flattened array
+         for(int j = 0; j < num_periods; j++)
+            returns[i * num_periods + j] = ret[j];
       }
       
-      OptimizeQuantumPortfolio(symbols, returns, g_quantumPortfolio);
+      OptimizeQuantumPortfolio(symbols, returns, num_symbols, num_periods, g_quantumPortfolio);
    }
    
    // Market impact calculation for current position

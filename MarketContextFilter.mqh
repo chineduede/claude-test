@@ -23,11 +23,14 @@ struct MarketContext
 {
    bool isValidSession;         // Trading session active
    bool isNewsTime;            // High-impact news nearby
+   bool isHighImpactNews;      // High-impact news event active
    bool isEndOfWeek;           // Friday afternoon
    bool isHoliday;             // Market holiday
    bool isLowLiquidity;        // Low liquidity period
+   bool isHighVolatility;      // High volatility period
    double correlationScore;     // Correlation with related pairs
    double marketSentiment;      // Overall market sentiment
+   double trendStrength;       // Current trend strength
    bool isMajorLevel;          // Near major S/R level
 };
 

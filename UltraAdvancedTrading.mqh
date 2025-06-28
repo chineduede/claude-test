@@ -1219,6 +1219,8 @@ void CalculateDynamicCorrelations(string symbols[], double &correlations[])
    }
 }
 
+#ifndef CALCULATE_CORRELATION_DEFINED
+#define CALCULATE_CORRELATION_DEFINED
 //+------------------------------------------------------------------+
 //| Calculate correlation between two arrays                         |
 //+------------------------------------------------------------------+
@@ -1245,6 +1247,7 @@ double CalculateCorrelation(const double &x[], const double &y[])
    
    return cov / MathSqrt(varX * varY);
 }
+#endif
 
 //+------------------------------------------------------------------+
 //| Calculate tail dependence                                        |

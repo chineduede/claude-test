@@ -46,6 +46,10 @@ struct EnhancedFeatures
    double rsiDivergence;       // RSI divergence score
    double bollingerPosition;   // Position within Bollinger Bands
    double pivotDistance;       // Distance to daily pivot
+   double bollingerWidth;      // Bollinger Band width
+   double pricePosition;       // Price position in range
+   double volumeProfile;       // Volume profile indicator
+   double atrPosition;         // ATR-based position
    
    // Sentiment indicators
    double orderFlowImbalance;  // Buy/sell pressure
@@ -326,6 +330,35 @@ void CalculateEnhancedFeatures(string symbol, EnhancedFeatures &features)
    double bb_range = bb_upper[0] - bb_lower[0];
    features.bollingerPosition = (current_price - bb_lower[0]) / bb_range;
    
+   // Bollinger Width
+   features.bollingerWidth = bb_range / bb_middle[0];  // Normalized BB width
+   
+   // Price position in range (0=low, 1=high)
+   double day_high = iHigh(symbol, PERIOD_D1, 0);
+   double day_low = iLow(symbol, PERIOD_D1, 0);
+   double day_range = day_high - day_low;
+   features.pricePosition = day_range > 0 ? (current_price - day_low) / day_range : 0.5;
+   
+   // Volume profile indicator
+   double vol_sum_upper = 0, vol_sum_lower = 0;
+   for(int i = 0; i < 20; i++)
+   {
+      double price = iClose(symbol, _Period, i);
+      double vol = (double)volume[i];
+      if(price > bb_middle[0])
+         vol_sum_upper += vol;
+      else
+         vol_sum_lower += vol;
+   }
+   features.volumeProfile = vol_sum_upper > 0 ? vol_sum_lower / vol_sum_upper : 1.0;
+   
+   // ATR position
+   double atr[];
+   ArraySetAsSeries(atr, true);
+   int atr_handle = iATR(symbol, _Period, 14);
+   CopyBuffer(atr_handle, 0, 0, 1, atr);
+   features.atrPosition = atr[0] / current_price;  // ATR as percentage of price
+   
    // Liquidity score (simplified - based on spread and volume)
    features.liquidityScore = features.relativeVolume / (1 + features.spreadRatio/100);
    
@@ -353,6 +386,8 @@ struct RangeData
    double volume;
    datetime startTime;
    datetime endTime;
+   double qualityScore;        // Range quality score
+   int breakoutDirection;      // Breakout direction: 1=up, -1=down, 0=none
 };
 
 //+------------------------------------------------------------------+

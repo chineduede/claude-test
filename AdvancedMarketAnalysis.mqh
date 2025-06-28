@@ -338,6 +338,8 @@ double CalculateADX(const double &high[], const double &low[], const double &clo
    return adx[0];
 }
 
+#ifndef CALCULATE_VOLATILITY_DEFINED
+#define CALCULATE_VOLATILITY_DEFINED
 //+------------------------------------------------------------------+
 //| Calculate volatility                                             |
 //+------------------------------------------------------------------+
@@ -361,6 +363,7 @@ double CalculateVolatility(const double &close[], int period)
    
    return MathSqrt(variance * 252);  // Annualized volatility
 }
+#endif
 
 //+------------------------------------------------------------------+
 //| Calculate trend strength                                         |

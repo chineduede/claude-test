@@ -232,7 +232,7 @@ struct UltraHFTSignals
 //+------------------------------------------------------------------+
 //| Quantum Portfolio Optimization                                   |
 //+------------------------------------------------------------------+
-void OptimizeQuantumPortfolio(string symbols[], const double &returns[], int returns_rows, int returns_cols,
+void OptimizeQuantumPortfolio(const string &symbols[], const double &returns[], int returns_rows, int returns_cols,
                               QuantumPortfolio &qp)
 {
    int n = ArraySize(symbols);
@@ -315,6 +315,8 @@ void CalculateEntanglement(const double &returns[], int returns_rows, int return
    }
 }
 
+#ifndef CALCULATE_CORRELATION_DEFINED
+#define CALCULATE_CORRELATION_DEFINED
 //+------------------------------------------------------------------+
 //| Calculate correlation between two arrays                         |
 //+------------------------------------------------------------------+
@@ -343,6 +345,7 @@ double CalculateCorrelation(const double &x[], const double &y[])
    if(denominator == 0) return 0;
    return numerator / denominator;
 }
+#endif
 
 //+------------------------------------------------------------------+
 //| Calculate mutual information                                     |
@@ -379,15 +382,15 @@ double CalculateMutualInformation(const double &x[], const double &y[])
    {
       for(int j = 0; j < bins; j++)
       {
-         if(hist2d[i][j] > 0)
+         if(hist2d[i * bins + j] > 0)
          {
-            double pxy = hist2d[i][j] / n;
+            double pxy = hist2d[i * bins + j] / n;
             double px = 0, py = 0;
             
             for(int k = 0; k < bins; k++)
             {
-               px += hist2d[i][k] / n;
-               py += hist2d[k][j] / n;
+               px += hist2d[i * bins + k] / n;
+               py += hist2d[k * bins + j] / n;
             }
             
             if(px > 0 && py > 0)
@@ -414,16 +417,18 @@ void EvolveQuantumState(QuantumPortfolio &qp, double temperature)
    {
       for(int j = 0; j < n; j++)
       {
-         complex<double> amp(0, 0);
+         ComplexNumber amp = ComplexCreate(0, 0);
          
          // Interference from entangled states
          for(int k = 0; k < n; k++)
          {
             double phase = qp.entanglement[j * n + k] * M_PI * temperature;
-            amp = amp + qp.amplitudes[i * n + k] * complex<double>(MathCos(phase), MathSin(phase));
+            ComplexNumber phaseComplex = ComplexCreate(MathCos(phase), MathSin(phase));
+            ComplexNumber scaledPhase = ComplexMultiplyScalar(phaseComplex, qp.amplitudes[i * n + k]);
+            amp = ComplexAdd(amp, scaledPhase);
          }
          
-         newAmplitudes[i * n + j] = abs(amp);
+         newAmplitudes[i * n + j] = ComplexAbs(amp);
       }
    }
    
@@ -557,7 +562,7 @@ void CalculateOptimalExecution(double totalSize, double timeHorizon,
 //+------------------------------------------------------------------+
 //| Create synthetic asset                                           |
 //+------------------------------------------------------------------+
-void CreateSyntheticAsset(string targetAsset, string availableAssets[],
+void CreateSyntheticAsset(string targetAsset, const string &availableAssets[],
                          SyntheticAsset &synthetic)
 {
    // Get returns data
@@ -667,7 +672,7 @@ void CalculateSyntheticGreeks(SyntheticAsset &synthetic)
 //+------------------------------------------------------------------+
 //| Calculate replication cost                                       |
 //+------------------------------------------------------------------+
-double CalculateReplicationCost(const double &weights[], const string assets[])
+double CalculateReplicationCost(const double &weights[], const string &assets[])
 {
    double cost = 0;
    
@@ -830,7 +835,8 @@ double rand_normal(double mean, double std)
 void CalculateBehavioralSignals(string symbol, BehavioralSignals &signals)
 {
    // Get price and volume data
-   double close[], volume[];
+   double close[];
+   long volume[];
    ArraySetAsSeries(close, true);
    ArraySetAsSeries(volume, true);
    CopyClose(symbol, PERIOD_H1, 0, 500, close);
@@ -847,7 +853,7 @@ void CalculateBehavioralSignals(string symbol, BehavioralSignals &signals)
    avgVolume /= 20;
    
    signals.overconfidence = volume[0] > avgVolume * 1.5 && volatility < 0.01 ? 
-                           (volume[0] / avgVolume - 1) * 50 : 0;
+                           ((double)volume[0] / avgVolume - 1) * 50 : 0;
    
    // Anchoring (price stickiness around round numbers)
    signals.anchoring = DetectAnchoring(close[0]);
@@ -865,6 +871,8 @@ void CalculateBehavioralSignals(string symbol, BehavioralSignals &signals)
    signals.recencyBias = CalculateRecencyBias(close);
 }
 
+#ifndef CALCULATE_VOLATILITY_DEFINED
+#define CALCULATE_VOLATILITY_DEFINED
 //+------------------------------------------------------------------+
 //| Calculate volatility                                             |
 //+------------------------------------------------------------------+
@@ -895,6 +903,7 @@ double CalculateVolatility(const double &prices[], int period)
    
    return MathSqrt(variance);
 }
+#endif
 
 //+------------------------------------------------------------------+
 //| Detect herding behavior                                          |
@@ -1665,39 +1674,62 @@ double CalculatePercentile(const double &data[], double percentile)
 }
 
 //+------------------------------------------------------------------+
-//| Complex number template                                          |
+//| Complex number structure                                         |
 //+------------------------------------------------------------------+
-template<typename T>
-struct complex
+struct ComplexNumber
 {
-   T real;
-   T imag;
-   
-   complex() : real(0), imag(0) {}
-   complex(T r, T i) : real(r), imag(i) {}
-   
-   complex operator+(const complex &other) const
-   {
-      return complex(real + other.real, imag + other.imag);
-   }
-   
-   complex operator*(const complex &other) const
-   {
-      return complex(real * other.real - imag * other.imag,
-                    real * other.imag + imag * other.real);
-   }
-   
-   complex operator*(const T &scalar) const
-   {
-      return complex(real * scalar, imag * scalar);
-   }
+   double real;
+   double imag;
 };
+
+//+------------------------------------------------------------------+
+//| Create complex number                                            |
+//+------------------------------------------------------------------+
+ComplexNumber ComplexCreate(double r, double i)
+{
+   ComplexNumber c;
+   c.real = r;
+   c.imag = i;
+   return c;
+}
+
+//+------------------------------------------------------------------+
+//| Add complex numbers                                              |
+//+------------------------------------------------------------------+
+ComplexNumber ComplexAdd(const ComplexNumber &a, const ComplexNumber &b)
+{
+   ComplexNumber result;
+   result.real = a.real + b.real;
+   result.imag = a.imag + b.imag;
+   return result;
+}
+
+//+------------------------------------------------------------------+
+//| Multiply complex numbers                                         |
+//+------------------------------------------------------------------+
+ComplexNumber ComplexMultiply(const ComplexNumber &a, const ComplexNumber &b)
+{
+   ComplexNumber result;
+   result.real = a.real * b.real - a.imag * b.imag;
+   result.imag = a.real * b.imag + a.imag * b.real;
+   return result;
+}
+
+//+------------------------------------------------------------------+
+//| Multiply complex number by scalar                                |
+//+------------------------------------------------------------------+
+ComplexNumber ComplexMultiplyScalar(const ComplexNumber &c, double scalar)
+{
+   ComplexNumber result;
+   result.real = c.real * scalar;
+   result.imag = c.imag * scalar;
+   return result;
+}
 
 //+------------------------------------------------------------------+
 //| Absolute value of complex number                                 |
 //+------------------------------------------------------------------+
-template<typename T>
-T abs(const complex<T> &c)
+double ComplexAbs(const ComplexNumber &c)
 {
    return MathSqrt(c.real * c.real + c.imag * c.imag);
 }
